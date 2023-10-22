@@ -31,11 +31,13 @@ class EmojiPicker(Gtk.Window):
         Gtk.Window.__init__(
             self,
             title="Emote",
-            window_position=Gtk.WindowPosition.CENTER,
+            window_position=Gtk.WindowPosition.NONE,
             resizable=False,
             deletable=False,
             name="emote_window",
         )
+        # devel position
+        self.move(0, 0)  # Set the coordinates to the top-left corner (x=0, y=0)
         self.set_default_size(500, 450)
         self.set_keep_above(True)
         self.dialog_open = False
@@ -321,21 +323,38 @@ class EmojiPicker(Gtk.Window):
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
         tab = keyval_name == "Tab" or keyval_name == "ISO_Left_Tab"
 
+        # TODO: split function into smaller code
         # retrieve current grid element, this is BEFORE the move actually happen
-        # actual_btn is a Gtk.AspectFrame => (child) Gtk.Button
-        actual_btn = self.grid.get_focus_child().get_child()
+        actual_btn = self.grid.get_focus_child()
         if actual_btn:
+            # actual_btn is a Gtk.AspectFrame => (child) Gtk.Button
+            actual_btn = actual_btn.get_child()
             # allocation = actual_btn.get_allocation()
-            # pos is tuple, 0 = row, 1 = column
-            pos = actual_btn.grid_position
-            print(f"current: {pos}")
-            if pos[1] == 1 and keyval == Gdk.KEY_Left:
-                # already at colunn 1 cycle move
-                print(f"cycle left: {pos} => {pos[0]}, 10")
-            if pos[1] == 10 and keyval == Gdk.KEY_Right:
+            # pos is tuple, 0 = row, 1 = column range: 1..n
+            pos_row, pos_col = actual_btn.grid_position
+            pos_txt = f"{pos_row}, {pos_col}"
+            move = None
+            nb_element_row = len(self.grid.buttons[pos_row - 1])
+            print(f"current: {pos_txt}, nb_element_row: {nb_element_row}")
+            if pos_col == 1 and keyval == Gdk.KEY_Left:
+                # already at column 1 cycle move
+                new_col, new_row = nb_element_row - 1, pos_row - 1
+                move = "left"
+            elif pos_col == nb_element_row and keyval == Gdk.KEY_Right:
                 # already at end of the row
-                # TODO: get row ending index
-                print(f"cycle right: {pos} => {pos[0]}, 1")
+                new_col, new_row = 0, pos_row - 1
+                move = "right"
+
+            if move:
+                # get_child_at(col, row) (left, top) range 0..n-1
+                next_btn = self.grid.buttons[new_row][new_col]
+                print(f"cycle {move}: {pos_txt} => {new_row}, {new_col} {next_btn.get_label()}")
+                if next_btn:
+                    next_btn.grab_focus()
+                    # here we consume the keyboard event, so the Grid wont add an extra move
+                    return True
+                else:
+                    print(f"next_btn is '{next_btn}' not found at {new_row}, {new_col}")
         else:
             print("not in grid")
 
@@ -565,9 +584,13 @@ class EmojiPicker(Gtk.Window):
 
         # keep track of our grid object
         self.grid = results_grid
+        # will store emojis buttons references
+        self.grid.buttons = []
         row = 0
 
         for emoji_row in grouper(emojis, EMOJIS_PER_ROW, None):
+            # create the empty row for the buttons
+            self.grid.buttons.append([])
             row += 1
             column = 0
 
@@ -590,8 +613,8 @@ class EmojiPicker(Gtk.Window):
                     )
                     btn.connect("event", self.on_emoji_btn_event)
 
-                # add extra property to keep track of the item posiont in the grid.
-                # grid coordinate are range: 1..n 
+                # add an extra property to keep track of the item position in the grid.
+                # grid coordinate are range: 1..n
                 btn.grid_position = row, column
                 if row == 1 and column == 1:
                     self.first_emoji_widget = btn
@@ -604,6 +627,9 @@ class EmojiPicker(Gtk.Window):
                 btn_af.add(btn)
 
                 results_grid.attach(btn_af, column, row, 1, 1)
+                # we only count buttons with emoji
+                if emoji:
+                    self.grid.buttons[row - 1].append(btn)
 
         return results_grid
 
@@ -695,6 +721,7 @@ class EmojiPicker(Gtk.Window):
 
     def get_posistion_in_grid(self, emoji):
         """
+        helper get position of an emoji in the grid
         emoji: dict (from get_emoji_by_char())
         returns: None, or a tuple(int, int) row, col range: 1..n
         """
