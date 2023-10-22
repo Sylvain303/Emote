@@ -46,6 +46,7 @@ class EmojiPicker(Gtk.Window):
         self.current_emojis = []
         self.first_emoji_widget = None
         self.target_emoji = None
+        self.grid = None
         self.search_debouncer = debouncer.SearchDebouncer(self.search_callback)
 
         self.app_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -269,8 +270,15 @@ class EmojiPicker(Gtk.Window):
 
     def show_emoji_preview(self, char):
         emoji = emojis.get_emoji_by_char(char)
+        # message is development visual helper
+        message = "X"
+        if self.grid:
+            grid_position = self.get_posistion_in_grid(emoji)
+            message = str(grid_position)
+        else:
+            message = "no grid"
 
-        self.previewed_emoji_label.set_text(self.get_skintone_char(emoji))
+        self.previewed_emoji_label.set_text(self.get_skintone_char(emoji) + message)
         self.previewed_emoji_shortcode_label.set_text(f':{emoji["shortcode"]}:')
         self.previewed_emoji_name_label.set_text(emoji["name"])
 
@@ -312,6 +320,24 @@ class EmojiPicker(Gtk.Window):
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
         tab = keyval_name == "Tab" or keyval_name == "ISO_Left_Tab"
+
+        # retrieve current grid element, this is BEFORE the move actually happen
+        # actual_btn is a Gtk.AspectFrame => (child) Gtk.Button
+        actual_btn = self.grid.get_focus_child().get_child()
+        if actual_btn:
+            # allocation = actual_btn.get_allocation()
+            # pos is tuple, 0 = row, 1 = column
+            pos = actual_btn.grid_position
+            print(f"current: {pos}")
+            if pos[1] == 1 and keyval == Gdk.KEY_Left:
+                # already at colunn 1 cycle move
+                print(f"cycle left: {pos} => {pos[0]}, 10")
+            if pos[1] == 10 and keyval == Gdk.KEY_Right:
+                # already at end of the row
+                # TODO: get row ending index
+                print(f"cycle right: {pos} => {pos[0]}, 1")
+        else:
+            print("not in grid")
 
         if ctrl and keyval_name == "f":
             self.search_entry.grab_focus()
@@ -537,6 +563,8 @@ class EmojiPicker(Gtk.Window):
         results_grid.set_row_homogeneous(True)
         results_grid.set_column_homogeneous(True)
 
+        # keep track of our grid object
+        self.grid = results_grid
         row = 0
 
         for emoji_row in grouper(emojis, EMOJIS_PER_ROW, None):
@@ -562,6 +590,9 @@ class EmojiPicker(Gtk.Window):
                     )
                     btn.connect("event", self.on_emoji_btn_event)
 
+                # add extra property to keep track of the item posiont in the grid.
+                # grid coordinate are range: 1..n 
+                btn.grid_position = row, column
                 if row == 1 and column == 1:
                     self.first_emoji_widget = btn
 
@@ -661,3 +692,22 @@ class EmojiPicker(Gtk.Window):
         cb.set_text(content, -1)
         if config.is_wayland:
             os.system(f'wl-copy "{content}"')
+
+    def get_posistion_in_grid(self, emoji):
+        """
+        emoji: dict (from get_emoji_by_char())
+        returns: None, or a tuple(int, int) row, col range: 1..n
+        """
+        if not self.grid:
+            return None
+
+        # accorging to:
+        # https://stackoverflow.com/questions/49756058/get-number-of-columns-in-gtk-grid
+        # there's no direct property / method to get grid rows, column sizes
+        char = emojis.strip_qualified_variant(emojis.strip_char_skintone(emoji['char']))
+        for child in self.grid.get_children():
+            btn = child.get_child()
+            btn_char = emojis.strip_qualified_variant(emojis.strip_char_skintone(btn.get_label()))
+            if btn_char == char:
+                return btn.grid_position
+        return None
